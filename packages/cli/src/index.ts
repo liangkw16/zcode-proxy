@@ -4,6 +4,10 @@ export { stopDaemon } from "./stop.js";
 export { fetchStatus } from "./status.js";
 export type { DaemonStatus } from "./status.js";
 export { loadConfig, saveConfig } from "./config-cmd.js";
+export { runDoctor } from "./doctor.js";
+export type { Check, DoctorDeps } from "./doctor.js";
+export { listModels } from "./models-cmd.js";
+export { onboardingSnippets } from "./onboarding.js";
 export {
   configDir,
   configPath,
