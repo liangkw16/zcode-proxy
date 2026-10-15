@@ -48,8 +48,21 @@ export class AccessTokenCache {
       .then(issue)
       .then((raw) => {
         const data = (raw as { data?: any })?.data;
-        if (data && data.enable === false) throw new Error("project_token_disabled");
-        if (!data || data.enable !== true || typeof data.accessToken !== "string") {
+        if (!data || typeof data !== "object") {
+          throw new Error("project_token_invalid_response");
+        }
+        // Mirror zcode's zod preprocess: the real API returns `enabled`
+        // (trailing d) and omits `enable`; when the `enable` discriminator is
+        // absent zcode treats the token as enabled. Only an explicit
+        // `enable: false` marks the plan as disabled.
+        const enable = "enable" in data ? data.enable : true;
+        if (enable === false) throw new Error("project_token_disabled");
+        if (
+          enable !== true ||
+          typeof data.accessToken !== "string" ||
+          !data.accessToken.trim() ||
+          data.tokenType !== "Bearer"
+        ) {
           throw new Error("project_token_invalid_response");
         }
         const expiresAt = Math.min(

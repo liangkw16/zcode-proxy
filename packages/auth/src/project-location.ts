@@ -38,7 +38,7 @@ export async function resolveProjectLocation(deps: ProjectLocationDeps): Promise
   const keyUrl =
     `${origin}/api/biz/v1/organization/${encodeURIComponent(org.organizationId)}` +
     `/projects/${encodeURIComponent(project.projectId)}/api_keys`;
-  const keyHeaders =
+  const keyHeaders: Record<string, string> =
     deps.family === "zai"
       ? { Authorization: authHeader, "Content-Type": "application/json" }
       : {

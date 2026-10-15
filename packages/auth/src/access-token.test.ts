@@ -50,4 +50,23 @@ describe("AccessTokenCache", () => {
       cache.resolve({ managementOrigin: "https://bigmodel.cn", location: loc }, issue),
     ).rejects.toThrow(/disabled/);
   });
+
+  it("accepts the real response that uses `enabled` without an `enable` flag", async () => {
+    const issue = vi.fn(async () => ({
+      code: 200,
+      data: {
+        enabled: true,
+        accessToken: "pat-real",
+        tokenType: "Bearer",
+        expiresIn: 3600,
+        expiresAt: Date.now() / 1000 + 3600,
+      },
+    }));
+    const cache = new AccessTokenCache();
+    const result = await cache.resolve(
+      { managementOrigin: "https://bigmodel.cn", location: loc },
+      issue,
+    );
+    expect(result.token).toBe("pat-real");
+  });
 });
