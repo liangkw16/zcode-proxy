@@ -21,23 +21,46 @@ export function createResponseStreamConverter(opts: { model: string }) {
   let responseId = "";
   let upstreamModel = opts.model;
   let finalUsage: any = {};
+  let createdAt = Math.floor(Date.now() / 1000);
+  let seq = 0;
+
+  function responseObject(status: string, output: any[]): any {
+    const input = finalUsage.input_tokens ?? 0;
+    const outputTokens = finalUsage.output_tokens ?? 0;
+    return {
+      id: responseId,
+      object: "response",
+      created_at: createdAt,
+      status,
+      model: upstreamModel,
+      output,
+      ...(status === "completed"
+        ? {
+            usage: {
+              input_tokens: input,
+              output_tokens: outputTokens,
+              total_tokens: input + outputTokens,
+            },
+          }
+        : {}),
+    };
+  }
 
   function process(ev: SSEEvent): SSEEvent[] {
     const out: SSEEvent[] = [];
-    const emit = (event: string, data: any) => out.push({ event, data });
+    // Every Responses SSE data payload carries the event `type` and a strictly
+    // increasing `sequence_number`; the OpenAI client (Codex) rejects events
+    // that omit them. Lifecycle events wrap the full response in `response`.
+    const emit = (event: string, data: any) =>
+      out.push({ event, data: { type: event, sequence_number: seq++, ...data } });
 
     switch (ev.event) {
       case "message_start": {
         responseId = randomId("resp_");
         upstreamModel = ev.data?.message?.model ?? upstreamModel;
-        emit("response.created", {
-          id: responseId,
-          object: "response",
-          status: "in_progress",
-          model: upstreamModel,
-          output: [],
-        });
-        emit("response.in_progress", { id: responseId });
+        createdAt = Math.floor(Date.now() / 1000);
+        emit("response.created", { response: responseObject("in_progress", []) });
+        emit("response.in_progress", { response: responseObject("in_progress", []) });
         break;
       }
       case "content_block_start": {
@@ -67,12 +90,18 @@ export function createResponseStreamConverter(opts: { model: string }) {
             delta: delta.text,
           });
         } else if (delta.type === "thinking_delta") {
-          item.text += delta.thinking_delta;
+          // Standard Anthropic uses `thinking_delta`; the GLM /api/anthropic
+          // compatibility layer emits the text as `thinking` instead.
+          const chunk = delta.thinking_delta ?? delta.thinking ?? "";
+          item.text += chunk;
           emit("response.reasoning_summary_text.delta", {
             output_index: i,
+            content_index: 0,
             summary_index: 0,
-            delta: delta.thinking_delta,
+            delta: chunk,
           });
+        } else if (delta.type === "signature_delta") {
+          // Reasoning signatures are not part of the Responses API; drop.
         } else if (delta.type === "input_json_delta") {
           item.text += delta.partial_json;
           emit("response.function_call_arguments.delta", {
@@ -99,6 +128,7 @@ export function createResponseStreamConverter(opts: { model: string }) {
         } else if (item.kind === "reasoning") {
           emit("response.reasoning_summary_text.done", {
             output_index: i,
+            content_index: 0,
             summary_index: 0,
             text: item.text,
           });
@@ -122,21 +152,7 @@ export function createResponseStreamConverter(opts: { model: string }) {
       }
       case "message_stop": {
         const output = order.map((i) => items.get(i)!.finalize());
-        const input = finalUsage.input_tokens ?? 0;
-        const outputTokens = finalUsage.output_tokens ?? 0;
-        emit("response.completed", {
-          id: responseId,
-          object: "response",
-          created_at: Math.floor(Date.now() / 1000),
-          status: "completed",
-          model: upstreamModel,
-          output,
-          usage: {
-            input_tokens: input,
-            output_tokens: outputTokens,
-            total_tokens: input + outputTokens,
-          },
-        });
+        emit("response.completed", { response: responseObject("completed", output) });
         break;
       }
     }

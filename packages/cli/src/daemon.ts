@@ -1,6 +1,6 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { createAuthServiceInternal, defaultNodeDeps } from "@zcode-proxy/auth";
-import { createModelMapping } from "@zcode-proxy/core";
+import { createModelMapping, createModelAttribution } from "@zcode-proxy/core";
 import { startGateway } from "@zcode-proxy/server";
 import { handleMessages, handleHealth, handleModels } from "@zcode-proxy/anthropic";
 import { handleResponses } from "@zcode-proxy/responses";
@@ -11,6 +11,7 @@ export async function runDaemon(config: ProxyConfig): Promise<void> {
   const auth = createAuthServiceInternal(deps);
   const endpoints = await auth.getEndpoints();
   const modelMapping = createModelMapping(config.modelOverrides);
+  const attribution = createModelAttribution();
 
   const gw = await startGateway(config.port, async (req) => {
     const url = new URL(req.url);
@@ -20,12 +21,14 @@ export async function runDaemon(config: ProxyConfig): Promise<void> {
       return handleMessages(req, {
         auth,
         modelMapping,
+        attribution,
         upstreamBaseUrl: endpoints.anthropicBaseUrl,
         fetchImpl: deps.fetchImpl,
       });
     if (url.pathname === "/v1/responses" && req.method === "POST")
       return handleResponses(req, {
         auth,
+        attribution,
         upstreamBaseUrl: endpoints.anthropicBaseUrl,
         fetchImpl: deps.fetchImpl,
       });

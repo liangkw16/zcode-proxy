@@ -24,6 +24,8 @@ describe("buildSourceHeaders", () => {
     expect(h["X-Client-Language"]).toBe("zh-CN");
     expect(h["X-Client-Timezone"]).toBe("Asia/Shanghai");
     expect(h["X-Device-Mid"]).toBe("MID123");
+    expect(h["X-Release-Channel"]).toBe("production");
+    expect(h["X-ZCode-Agent"]).toBe("glm");
   });
 
   it("omits optional fields when absent", () => {

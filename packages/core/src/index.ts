@@ -7,3 +7,5 @@ export { createThinkingEventFilter } from "./thinking-stream.js";
 export type { ThinkingEventFilter } from "./thinking-stream.js";
 export { sendWithAuthRetry } from "./upstream-request.js";
 export type { UpstreamRequestInput } from "./upstream-request.js";
+export { createModelAttribution } from "./attribution.js";
+export type { ModelAttribution } from "./attribution.js";

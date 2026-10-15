@@ -5,12 +5,13 @@ import {
   serializeSSE,
   stripThinkingFromMessage,
 } from "@zcode-proxy/core";
-import type { ModelMapping } from "@zcode-proxy/core";
+import type { ModelMapping, ModelAttribution } from "@zcode-proxy/core";
 import { filterAnthropicBeta } from "./beta-filter.js";
 
 export interface MessagesContext {
   auth: { getUpstreamHeaders: (force?: boolean) => Promise<Record<string, string>> };
   modelMapping: ModelMapping;
+  attribution: ModelAttribution;
   upstreamBaseUrl: string;
   fetchImpl: typeof fetch;
 }
@@ -23,12 +24,17 @@ export async function handleMessages(req: Request, ctx: MessagesContext): Promis
     model: ctx.modelMapping.map(inbound.model),
   };
   const body = JSON.stringify(outbound);
+  // Minted once per inbound request so a 401 retry keeps the same correlation ids.
+  const attributionHeaders = ctx.attribution.createHeaders();
 
   const upstream = await sendWithAuthRetry({
     getHeaders: async (force) => {
       const base = await ctx.auth.getUpstreamHeaders(force);
       const clientBeta = req.headers.get("anthropic-beta");
-      return filterAnthropicBeta(clientBeta ? { ...base, "anthropic-beta": clientBeta } : base);
+      const filtered = filterAnthropicBeta(
+        clientBeta ? { ...base, "anthropic-beta": clientBeta } : base,
+      );
+      return { ...filtered, ...attributionHeaders };
     },
     send: (headers) =>
       ctx.fetchImpl(`${ctx.upstreamBaseUrl}/v1/messages`, {

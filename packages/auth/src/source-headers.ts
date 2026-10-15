@@ -10,6 +10,7 @@ export interface SourceHeaderInput {
   clientLanguage?: string;
   clientTimezone?: string;
   endpointOrigin?: string;
+  releaseChannel?: string;
 }
 
 function clean(v: string | undefined): string | undefined {
@@ -31,12 +32,15 @@ export function buildSourceHeaders(input: SourceHeaderInput): Record<string, str
   const deviceMid = clean(input.deviceMid);
   const sourceTitle = clean(input.sourceTitle) ?? "electron";
   const referer = clean(input.endpointOrigin) ?? "https://zcode.z.ai";
+  const releaseChannel = clean(input.releaseChannel) ?? "production";
 
   return {
     "User-Agent": `ZCode/${appVersion ?? "unknown"}`,
     "HTTP-Referer": referer,
     "X-Title": `Z Code@${sourceTitle}`,
     ...(appVersion ? { "X-ZCode-App-Version": appVersion } : {}),
+    "X-Release-Channel": releaseChannel,
+    "X-ZCode-Agent": "glm",
     ...(platform && arch ? { "X-Platform": `${platform}-${arch}` } : {}),
     ...(platform ? { "X-Os-Category": osCategory(platform) } : {}),
     ...(osRelease ? { "X-Os-Version": osRelease } : {}),

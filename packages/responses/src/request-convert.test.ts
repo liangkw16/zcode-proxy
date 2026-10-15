@@ -38,6 +38,29 @@ describe("convertResponsesRequest", () => {
     ]);
   });
 
+  it("flattens namespace tool groups and drops native-only tools", () => {
+    const { anthropicBody } = convertResponsesRequest({
+      input: "x",
+      tools: [
+        { type: "function", name: "exec_command", description: "run", parameters: { type: "object" } },
+        {
+          type: "namespace",
+          name: "multi_agent_v1",
+          tools: [
+            { type: "function", name: "spawn_agent", description: "spawn", parameters: { type: "object" } },
+            { type: "function", name: "wait_agent", description: "wait", parameters: { type: "object" } },
+          ],
+        },
+        { type: "web_search", external_web_access: false },
+      ],
+    });
+    expect(anthropicBody.tools.map((t: any) => t.name)).toEqual([
+      "exec_command",
+      "spawn_agent",
+      "wait_agent",
+    ]);
+  });
+
   it("converts a function_call/function_call_output round trip", () => {
     const { anthropicBody } = convertResponsesRequest({
       input: [

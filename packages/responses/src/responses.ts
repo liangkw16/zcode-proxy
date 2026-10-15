@@ -5,12 +5,14 @@ import {
   serializeSSE,
   stripThinkingFromMessage,
 } from "@zcode-proxy/core";
+import type { ModelAttribution } from "@zcode-proxy/core";
 import { convertResponsesRequest } from "./request-convert.js";
 import { convertAnthropicToResponse } from "./response-convert.js";
 import { createResponseStreamConverter } from "./stream-convert.js";
 
 export interface ResponsesContext {
   auth: { getUpstreamHeaders: (force?: boolean) => Promise<Record<string, string>> };
+  attribution: ModelAttribution;
   upstreamBaseUrl: string;
   fetchImpl: typeof fetch;
 }
@@ -18,23 +20,16 @@ export interface ResponsesContext {
 export async function handleResponses(req: Request, ctx: ResponsesContext): Promise<Response> {
   const inbound = await req.json();
 
-  const unsupported = (inbound.tools ?? []).find((t: any) => t.type !== "function");
-  if (unsupported) {
-    return new Response(
-      JSON.stringify({
-        error: {
-          code: "unsupported_tool",
-          message: `tool type ${unsupported.type} is not supported`,
-        },
-      }),
-      { status: 400, headers: { "content-type": "application/json" } },
-    );
-  }
-
   const { anthropicBody, wantsThinking } = convertResponsesRequest(inbound);
 
+  // Minted once per inbound request so a 401 retry keeps the same correlation ids.
+  const attributionHeaders = ctx.attribution.createHeaders();
+
   const upstream = await sendWithAuthRetry({
-    getHeaders: (force) => ctx.auth.getUpstreamHeaders(force),
+    getHeaders: async (force) => ({
+      ...(await ctx.auth.getUpstreamHeaders(force)),
+      ...attributionHeaders,
+    }),
     send: (headers) =>
       ctx.fetchImpl(`${ctx.upstreamBaseUrl}/v1/messages`, {
         method: "POST",

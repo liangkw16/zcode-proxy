@@ -26,13 +26,13 @@ export function convertResponsesRequest(body: any): ConvertedRequest {
 
   const messages = convertItems(rawItems);
 
-  const functionTools = (body.tools ?? [])
-    .filter((t: any) => t.type === "function")
-    .map((t: any) => ({
-      name: t.name,
-      description: t.description ?? "",
-      input_schema: t.parameters ?? { type: "object", properties: {} },
-    }));
+  // Codex (and some OpenAI clients) send plain function tools, `namespace`
+  // containers holding function tools, and native-only tools (web_search /
+  // file_search / code_interpreter / computer_use) the Anthropic upstream has
+  // no equivalent for. Flatten namespace functions; silently drop the
+  // native-only tools rather than failing the whole request (they encode
+  // client-side optional features, not required server capabilities).
+  const functionTools = normalizeTools(body.tools ?? []);
   const wantsTools = body.tool_choice !== "none" && functionTools.length > 0;
 
   const effort = body.reasoning?.effort;
@@ -130,4 +130,27 @@ function safeParseArgs(raw: string): any {
   } catch {
     return {};
   }
+}
+
+function toAnthropicTool(t: any): any {
+  return {
+    name: t.name,
+    description: t.description ?? "",
+    input_schema: t.parameters ?? { type: "object", properties: {} },
+  };
+}
+
+function normalizeTools(rawTools: any[]): any[] {
+  const out: any[] = [];
+  const visit = (tool: any) => {
+    if (tool?.type === "function") {
+      out.push(toAnthropicTool(tool));
+    } else if (tool?.type === "namespace" && Array.isArray(tool.tools)) {
+      for (const inner of tool.tools) visit(inner);
+    }
+    // Native-only tools (web_search/file_search/code_interpreter/computer_use)
+    // have no Anthropic equivalent and are dropped.
+  };
+  for (const tool of rawTools) visit(tool);
+  return out;
 }

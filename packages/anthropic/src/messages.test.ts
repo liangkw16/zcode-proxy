@@ -9,6 +9,16 @@ function makeCtx(upstream: Response, opts: { headers?: Record<string, string> } 
     modelMapping: createModelMapping(),
     upstreamBaseUrl: "https://bigmodel.cn/api/anthropic",
     fetchImpl: vi.fn(async () => upstream),
+    attribution: {
+      createHeaders: vi.fn(() => ({
+        "x-request-id": "req-1",
+        "x-zcode-session-type": "main",
+        "x-zcode-trace-id": "trace-1",
+        "x-query-id": "q-1",
+        "x-zcode-query-source": "main_turn",
+        "x-session-id": "sess-1",
+      })),
+    } as any,
   };
 }
 
@@ -49,5 +59,23 @@ describe("handleMessages", () => {
     });
     const res = await handleMessages(req, ctx);
     expect((await res.json()).content).toHaveLength(2);
+  });
+
+  it("injects zcode per-request attribution headers on the upstream call", async () => {
+    const upstream = Response.json({ content: [{ type: "text", text: "ok" }] });
+    const ctx = makeCtx(upstream);
+    const req = new Request("http://x/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({ model: "claude-sonnet-4-5", stream: false }),
+    });
+    await handleMessages(req, ctx);
+    const sentInit = ctx.fetchImpl.mock.calls[0][1];
+    const sent = new Headers(sentInit.headers);
+    expect(sent.get("x-zcode-session-type")).toBe("main");
+    expect(sent.get("x-zcode-query-source")).toBe("main_turn");
+    expect(sent.get("x-request-id")).toBe("req-1");
+    expect(sent.get("x-zcode-trace-id")).toBe("trace-1");
+    expect(sent.get("x-query-id")).toBe("q-1");
+    expect(sent.get("x-session-id")).toBe("sess-1");
   });
 });
