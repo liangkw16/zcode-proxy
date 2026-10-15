@@ -1,7 +1,9 @@
 node_modules/
 dist/
+*.tsbuildinfo
 *.log
 .DS_Store
+.superpowers/
 
 # 克隆的第三方源码（有独立 git 仓库）
 ZCode/
