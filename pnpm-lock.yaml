@@ -21,7 +21,14 @@ importers:
         specifier: ^3.23.0
         version: 3.25.76
 
-  packages/anthropic: {}
+  packages/anthropic:
+    dependencies:
+      '@zcode-proxy/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@zcode-proxy/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/auth:
     dependencies:
