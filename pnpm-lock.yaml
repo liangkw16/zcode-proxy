@@ -46,6 +46,9 @@ importers:
 
   packages/responses:
     dependencies:
+      '@zcode-proxy/auth':
+        specifier: workspace:*
+        version: link:../auth
       '@zcode-proxy/core':
         specifier: workspace:*
         version: link:../core
