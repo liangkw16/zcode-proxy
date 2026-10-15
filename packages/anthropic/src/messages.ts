@@ -9,9 +9,12 @@ import type { ModelMapping, ModelAttribution } from "@zcode-proxy/core";
 import { filterAnthropicBeta } from "./beta-filter.js";
 
 export interface MessagesContext {
-  auth: { getUpstreamHeaders: (force?: boolean) => Promise<Record<string, string>> };
+  auth: {
+    getUpstreamHeaders: (force?: boolean, failedToken?: string) => Promise<Record<string, string>>;
+  };
   modelMapping: ModelMapping;
   attribution: ModelAttribution;
+  signal: AbortSignal;
   upstreamBaseUrl: string;
   fetchImpl: typeof fetch;
 }
@@ -41,13 +44,18 @@ export async function handleMessages(req: Request, ctx: MessagesContext): Promis
         method: "POST",
         headers,
         body,
+        signal: ctx.signal,
       }),
   });
 
   if (!upstream.ok || !upstream.body) {
+    // Pass through backoff hints on 429/503 per spec §11.
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    const retryAfter = upstream.headers.get("retry-after");
+    if (retryAfter) headers["retry-after"] = retryAfter;
     return new Response(upstream.body, {
       status: upstream.status,
-      headers: { "content-type": "application/json" },
+      headers,
     });
   }
 

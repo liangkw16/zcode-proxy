@@ -2,8 +2,25 @@ function randomId(prefix: string): string {
   return prefix + Math.random().toString(36).slice(2, 14);
 }
 
+export function statusForStop(stopReason: string | undefined): {
+  status: string;
+  incomplete_details?: { reason: string };
+} {
+  if (stopReason === "max_tokens") {
+    return { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } };
+  }
+  if (stopReason === "overloaded_error" || stopReason === "error") {
+    return { status: "failed" };
+  }
+  // end_turn / tool_use / stop_sequence / pause_turn all reach a terminal,
+  // usable state.
+  return { status: "completed" };
+}
+
 export function convertAnthropicToResponse(anthropic: any, requestModel: string): any {
   const blocks = Array.isArray(anthropic.content) ? anthropic.content : [];
+  const { status, incomplete_details } = statusForStop(anthropic.stop_reason);
+  const itemStatus = status === "completed" ? "completed" : "incomplete";
   const output: any[] = [];
 
   for (const b of blocks) {
@@ -21,7 +38,7 @@ export function convertAnthropicToResponse(anthropic: any, requestModel: string)
         id,
         type: "message",
         role: "assistant",
-        status: "completed",
+        status: status === "completed" ? "completed" : itemStatus,
         content: [{ type: "output_text", text: b.text ?? "", annotations: [] }],
       });
     } else if (b.type === "tool_use") {
@@ -43,7 +60,8 @@ export function convertAnthropicToResponse(anthropic: any, requestModel: string)
     id: randomId("resp_"),
     object: "response",
     created_at: Math.floor(Date.now() / 1000),
-    status: "completed",
+    status,
+    ...(incomplete_details ? { incomplete_details } : {}),
     model: requestModel,
     output,
     usage: {

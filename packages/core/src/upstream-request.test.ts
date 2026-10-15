@@ -18,7 +18,9 @@ describe("sendWithAuthRetry", () => {
     const res = await sendWithAuthRetry({ getHeaders, send });
     expect(res.status).toBe(200);
     expect(getHeaders).toHaveBeenNthCalledWith(1, false);
-    expect(getHeaders).toHaveBeenNthCalledWith(2, true);
+    // The forced refresh is told which token failed so a late 401 against an
+    // old token cannot discard a newer token another request already got.
+    expect(getHeaders).toHaveBeenNthCalledWith(2, true, "old");
   });
 
   it("does not retry on 200", async () => {

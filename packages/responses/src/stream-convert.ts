@@ -1,4 +1,5 @@
 import type { SSEEvent } from "@zcode-proxy/core";
+import { statusForStop } from "./response-convert.js";
 
 function randomId(prefix: string): string {
   return prefix + Math.random().toString(36).slice(2, 14);
@@ -21,20 +22,16 @@ export function createResponseStreamConverter(opts: { model: string }) {
   let responseId = "";
   let upstreamModel = opts.model;
   let finalUsage: any = {};
+  let stopReason: string | undefined;
+  let terminalSent = false;
   let createdAt = Math.floor(Date.now() / 1000);
   let seq = 0;
 
   function responseObject(status: string, output: any[]): any {
     const input = finalUsage.input_tokens ?? 0;
     const outputTokens = finalUsage.output_tokens ?? 0;
-    return {
-      id: responseId,
-      object: "response",
-      created_at: createdAt,
-      status,
-      model: upstreamModel,
-      output,
-      ...(status === "completed"
+    const withUsage =
+      status === "completed" || status === "incomplete"
         ? {
             usage: {
               input_tokens: input,
@@ -42,7 +39,15 @@ export function createResponseStreamConverter(opts: { model: string }) {
               total_tokens: input + outputTokens,
             },
           }
-        : {}),
+        : {};
+    return {
+      id: responseId,
+      object: "response",
+      created_at: createdAt,
+      status,
+      model: upstreamModel,
+      output,
+      ...withUsage,
     };
   }
 
@@ -58,6 +63,10 @@ export function createResponseStreamConverter(opts: { model: string }) {
       case "message_start": {
         responseId = randomId("resp_");
         upstreamModel = ev.data?.message?.model ?? upstreamModel;
+        // Standard Anthropic streaming reports input tokens on message_start
+        // (message.usage.input_tokens); output tokens arrive in message_delta.
+        const startUsage = ev.data?.message?.usage;
+        if (startUsage) finalUsage = { ...startUsage, ...finalUsage };
         createdAt = Math.floor(Date.now() / 1000);
         emit("response.created", { response: responseObject("in_progress", []) });
         emit("response.in_progress", { response: responseObject("in_progress", []) });
@@ -147,12 +156,34 @@ export function createResponseStreamConverter(opts: { model: string }) {
         break;
       }
       case "message_delta": {
+        if (ev.data?.delta?.stop_reason) stopReason = ev.data.delta.stop_reason;
         if (ev.data?.usage) finalUsage = { ...finalUsage, ...ev.data.usage };
         break;
       }
+      case "error": {
+        // An in-stream error (e.g. overloaded_error) must surface as a failed
+        // terminal response instead of leaving the client hanging after only
+        // the created event.
+        const err = ev.data?.error ?? ev.data ?? {};
+        const response = responseObject("failed", []);
+        response.error = {
+          type: err.type ?? "api_error",
+          message: err.message ?? "upstream stream error",
+        };
+        emit("response.failed", { response });
+        terminalSent = true;
+        break;
+      }
       case "message_stop": {
+        if (terminalSent) break;
         const output = order.map((i) => items.get(i)!.finalize());
-        emit("response.completed", { response: responseObject("completed", output) });
+        const { status, incomplete_details } = statusForStop(stopReason);
+        const response = responseObject(status, output);
+        if (incomplete_details) response.incomplete_details = incomplete_details;
+        // Event name mirrors the terminal status: response.completed /
+        // response.incomplete / response.failed.
+        emit(`response.${status}`, { response });
+        terminalSent = true;
         break;
       }
     }

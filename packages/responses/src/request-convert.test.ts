@@ -132,3 +132,98 @@ describe("convertToolChoice", () => {
     });
   });
 });
+
+import { createModelMapping } from "@zcode-proxy/core";
+
+describe("convertResponsesRequest robustness", () => {
+  it("accepts a message item that omits type and uses a string content", () => {
+    const { anthropicBody } = convertResponsesRequest({
+      model: "GLM-5.3",
+      input: [{ role: "user", content: "hello" }],
+    });
+    expect(anthropicBody.messages).toEqual([
+      { role: "user", content: [{ type: "text", text: "hello" }] },
+    ]);
+  });
+
+  it("maps inbound model names via ModelMapping (claude-haiku -> Flash)", () => {
+    const { anthropicBody } = convertResponsesRequest(
+      { model: "claude-haiku-4-5", input: "hi" },
+      createModelMapping(),
+    );
+    expect(anthropicBody.model).toBe("GLM-5.3-Flash");
+  });
+
+  it("errors when tool_choice requires a native-only tool that was dropped", () => {
+    const result = convertResponsesRequest({
+      input: "x",
+      tools: [{ type: "web_search", name: "web_search" }],
+      tool_choice: "required",
+    });
+    expect(result.unsupportedTool).toBeTruthy();
+  });
+
+  it("still drops native tools silently when usable functions remain (auto choice)", () => {
+    const result = convertResponsesRequest({
+      input: "x",
+      tools: [
+        { type: "function", name: "exec_command", parameters: { type: "object" } },
+        { type: "web_search" },
+      ],
+      tool_choice: "auto",
+    });
+    expect(result.unsupportedTool).toBeUndefined();
+    expect(result.anthropicBody.tools.map((t: any) => t.name)).toEqual(["exec_command"]);
+  });
+
+  it("errors when a named tool_choice points at a dropped native tool", () => {
+    const result = convertResponsesRequest({
+      input: "x",
+      tools: [{ type: "web_search", name: "web_search" }],
+      tool_choice: { type: "function", name: "web_search" },
+    });
+    expect(result.unsupportedTool).toBe("web_search");
+  });
+
+  it("converts a remote https image_url into a valid url source", () => {
+    const { anthropicBody } = convertResponsesRequest({
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_image",
+              image_url: "https://example.com/image.png",
+            },
+          ],
+        },
+      ],
+    });
+    const block = anthropicBody.messages[0].content[0];
+    expect(block.type).toBe("image");
+    expect(block.source).toEqual({
+      type: "url",
+      url: "https://example.com/image.png",
+    });
+  });
+
+  it("converts a data URL image into a base64 source", () => {
+    const dataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
+    const { anthropicBody } = convertResponsesRequest({
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_image", image_url: dataUrl }],
+        },
+      ],
+    });
+    const block = anthropicBody.messages[0].content[0];
+    expect(block.source).toEqual({
+      type: "base64",
+      media_type: "image/png",
+      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+    });
+  });
+});

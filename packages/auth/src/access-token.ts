@@ -88,8 +88,25 @@ export class AccessTokenCache {
     return pending;
   }
 
-  invalidate(scope: CacheScope): void {
-    this.#entries.delete(scopeKey(scope));
+  /**
+   * Drop a cached token so the next resolve() re-issues.
+   *
+   * - If an issue is already in flight, keep it so concurrent callers share a
+   *   single re-issue (singleflight) instead of each minting a new token.
+   * - With expectedToken, only invalidate when the cached token is still the
+   *   one that failed. A late 401 for an older token must not discard a newer
+   *   token that another request already obtained.
+   */
+  invalidate(scope: CacheScope, expectedToken?: string): void {
+    const key = scopeKey(scope);
+    const entry = this.#entries.get(key);
+    if (!entry) return;
+    if (entry.pending) return; // a re-issue is already running; share it
+    if (expectedToken && entry.value && entry.value.token !== expectedToken) {
+      return; // cache already holds a newer token; leave it
+    }
+    entry.value = undefined;
+    entry.refreshAt = undefined;
   }
 
   clear(): void {

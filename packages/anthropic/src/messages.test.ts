@@ -7,6 +7,7 @@ function makeCtx(upstream: Response, opts: { headers?: Record<string, string> } 
   return {
     auth: { getUpstreamHeaders: getHeaders } as any,
     modelMapping: createModelMapping(),
+    signal: new AbortController().signal,
     upstreamBaseUrl: "https://bigmodel.cn/api/anthropic",
     fetchImpl: vi.fn(async () => upstream),
     attribution: {
@@ -77,5 +78,50 @@ describe("handleMessages", () => {
     expect(sent.get("x-zcode-trace-id")).toBe("trace-1");
     expect(sent.get("x-query-id")).toBe("q-1");
     expect(sent.get("x-session-id")).toBe("sess-1");
+  });
+});
+
+describe("handleMessages error & abort", () => {
+  it("passes through upstream Retry-After on 429", async () => {
+    const upstream = new Response(JSON.stringify({ error: { type: "rate_limit_error" } }), {
+      status: 429,
+      headers: { "content-type": "application/json", "retry-after": "30" },
+    });
+    const ctx = makeCtx(upstream);
+    const req = new Request("http://x/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({ model: "claude-sonnet", stream: false }),
+    });
+    const res = await handleMessages(req, ctx);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("30");
+  });
+
+  it("passes through Retry-After on 503", async () => {
+    const upstream = new Response(JSON.stringify({ error: { type: "api_error" } }), {
+      status: 503,
+      headers: { "content-type": "application/json", "retry-after": "5" },
+    });
+    const ctx = makeCtx(upstream);
+    const req = new Request("http://x/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({ model: "claude-sonnet", stream: false }),
+    });
+    const res = await handleMessages(req, ctx);
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("5");
+  });
+
+  it("forwards the client abort signal to the upstream fetch", async () => {
+    const upstream = Response.json({ content: [{ type: "text", text: "ok" }] });
+    const controller = new AbortController();
+    const ctx = makeCtx(upstream);
+    ctx.signal = controller.signal;
+    const req = new Request("http://x/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({ model: "claude-sonnet", stream: false }),
+    });
+    await handleMessages(req, ctx);
+    expect(ctx.fetchImpl.mock.calls[0][1].signal).toBe(controller.signal);
   });
 });

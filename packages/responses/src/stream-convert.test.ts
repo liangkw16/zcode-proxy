@@ -82,3 +82,58 @@ describe("response stream converter", () => {
     expect(summary?.data.delta).toBe("reasoning here");
   });
 });
+
+function runConverter(c: ReturnType<typeof createResponseStreamConverter>, events: any[]): SSEEvent[] {
+  const out: SSEEvent[] = [];
+  for (const e of events) for (const o of c.process(ev(e.event ?? e.type, e.data ?? e))) out.push(o);
+  return out;
+}
+
+describe("response stream converter status & usage", () => {
+  it("reads input_tokens from message_start and merges output tokens", () => {
+    const c = createResponseStreamConverter({ model: "gpt-5-codex" });
+    const out = runConverter(c, [
+      { event: "message_start", data: { message: { model: "GLM-5.3", usage: { input_tokens: 25 } } } },
+      ev("content_block_start", { index: 0, content_block: { type: "text" } }),
+      ev("content_block_stop", { index: 0 }),
+      ev("message_delta", { delta: { stop_reason: "end_turn" }, usage: { output_tokens: 15 } }),
+      ev("message_stop", {}),
+    ]);
+    const completed = out.find((e) => e.event === "response.completed");
+    expect(completed?.data.response.usage).toEqual({
+      input_tokens: 25,
+      output_tokens: 15,
+      total_tokens: 40,
+    });
+  });
+
+  it("emits response.incomplete when stop_reason is max_tokens", () => {
+    const c = createResponseStreamConverter({ model: "gpt-5-codex" });
+    const out = runConverter(c, [
+      { event: "message_start", data: { message: { model: "GLM-5.3", usage: { input_tokens: 1 } } } },
+      ev("content_block_start", { index: 0, content_block: { type: "text" } }),
+      ev("content_block_stop", { index: 0 }),
+      ev("message_delta", { delta: { stop_reason: "max_tokens" }, usage: { output_tokens: 4096 } }),
+      ev("message_stop", {}),
+    ]);
+    expect(out.some((e) => e.event === "response.incomplete")).toBe(true);
+    expect(out.some((e) => e.event === "response.completed")).toBe(false);
+    const incomplete = out.find((e) => e.event === "response.incomplete");
+    expect(incomplete?.data.response.status).toBe("incomplete");
+    expect(incomplete?.data.response.incomplete_details).toEqual({
+      reason: "max_output_tokens",
+    });
+  });
+
+  it("emits response.failed when an in-stream error arrives after message_start", () => {
+    const c = createResponseStreamConverter({ model: "gpt-5-codex" });
+    const out = runConverter(c, [
+      { event: "message_start", data: { message: { model: "GLM-5.3", usage: { input_tokens: 3 } } } },
+      { event: "error", data: { type: "error", error: { type: "overloaded_error", message: "Overloaded" } } },
+    ]);
+    const failed = out.find((e) => e.event === "response.failed");
+    expect(failed).toBeTruthy();
+    expect(failed?.data.response.status).toBe("failed");
+    expect(out.some((e) => e.event === "response.completed")).toBe(false);
+  });
+});
