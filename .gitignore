@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# 克隆的第三方源码（有独立 git 仓库）
+ZCode/
